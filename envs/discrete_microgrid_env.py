@@ -24,10 +24,15 @@ import numpy as np
 
 
 class DiscreteMicrogridEnv:
-    def __init__(self, battery_capacity=10, episode_length=24, seed=None):
+    def __init__(self, battery_capacity=10, max_grid_import=2.0, episode_length=24, seed=None):
         self.battery_capacity = battery_capacity
         self.episode_length = episode_length
+
+        # The grid can only cover up to this amount of demand per step.
+        # This makes unmet demand possible if demand is high and the battery is empty.
+        self.max_grid_import = max_grid_import
         self.rng = np.random.default_rng(seed)
+
 
         # Actions the RL agent can choose.
         self.actions = {
@@ -95,10 +100,13 @@ class DiscreteMicrogridEnv:
         Returns:
             next_state, reward, done, info
         """
+        action = int(action)  #  Convert NumPy integers into normal Python integers.
+        
         if action not in self.actions:
             raise ValueError("Action must be 0=charge, 1=idle, or 2=discharge.")
 
-        action = int(action)  # Ensure action is an integer easier
+        
+
         demand = self.demand_values[self.demand_regime]
         solar = self.solar_values[self.solar_regime]
 
@@ -121,7 +129,7 @@ class DiscreteMicrogridEnv:
                 charge_amount = 0.0
 
             # If solar cannot meet demand, grid covers the shortfall.
-            grid_import = max(0.0, demand - solar)
+            grid_import = self.get_grid_import(demand - solar)
 
             # Any surplus solar not stored is wasted.
             wasted_solar = max(0.0, surplus_solar - charge_amount)
@@ -132,7 +140,7 @@ class DiscreteMicrogridEnv:
         elif action == 1:
             # Battery does nothing.
             # Grid covers any shortage.
-            grid_import = max(0.0, demand - solar)
+            grid_import = self.get_grid_import(demand - solar)
 
             # Extra solar is wasted if not stored.
             wasted_solar = max(0.0, solar - demand)
@@ -146,7 +154,7 @@ class DiscreteMicrogridEnv:
                 battery_used = 1.0
 
             # After solar and battery, grid covers the remaining demand.
-            grid_import = max(0.0, demand - solar - battery_used)
+            grid_import =   self.get_grid_import(demand - solar - battery_used)
 
             # If solar already exceeds demand, extra solar is wasted.
             wasted_solar = max(0.0, solar - demand)
@@ -201,6 +209,14 @@ class DiscreteMicrogridEnv:
             self.solar_regime,
             self.time_bin,
         )
+    def get_grid_import(self, remaining_demand):
+        """
+        Grid import is limited.
+
+        If the remaining demand is larger than this limit, the rest becomes unmet demand.
+        This makes the environment more like a real load-balancing problem.
+        """
+        return min(self.max_grid_import, max(0.0, remaining_demand))
 
     def get_time_bin(self, hour):
         """
@@ -260,10 +276,8 @@ class DiscreteMicrogridEnv:
         - wasted solar: inefficient
         - battery use: small wear cost
 
-        In this simple setup, grid_import covers any remaining demand,
-        so unmet demand should usually be zero. We still keep it in the
-        reward because it makes the objective clear and lets us extend
-        the environment later if grid import is limited.
+        Grid import is limited, so unmet demand can happen when demand is high,
+        solar is low, and the battery cannot cover the shortage.
         """
         unmet_demand = max(0.0, demand - solar - battery_used - grid_import)
 
