@@ -254,3 +254,112 @@ A learned policy should improve on this by:
 - achieving a less negative total reward than the random policy.
 
 This gives a clear baseline for Q-learning to beat.
+
+
+
+## First Q-learning run
+
+I trained the first tabular Q-learning agent for 1000 episodes using the discrete microgrid environment.
+
+The agent used:
+- alpha = 0.3
+- gamma = 0.95
+- epsilon start = 1.0
+- epsilon minimum = 0.05
+- epsilon decay = 0.995
+
+The goal was to check whether Q-learning could improve over the random baseline.
+
+### Training output
+
+```text
+Episode 100 | Avg reward: -48.36 | Avg unmet demand: 2.42 | Avg grid import: 21.89 | Epsilon: 0.606
+Episode 200 | Avg reward: -44.49 | Avg unmet demand: 2.09 | Avg grid import: 21.27 | Epsilon: 0.367
+Episode 300 | Avg reward: -36.23 | Avg unmet demand: 1.29 | Avg grid import: 21.30 | Epsilon: 0.222
+Episode 400 | Avg reward: -40.02 | Avg unmet demand: 1.66 | Avg grid import: 21.37 | Epsilon: 0.135
+Episode 500 | Avg reward: -33.20 | Avg unmet demand: 0.96 | Avg grid import: 21.71 | Epsilon: 0.082
+Episode 600 | Avg reward: -31.11 | Avg unmet demand: 0.77 | Avg grid import: 21.63 | Epsilon: 0.050
+Episode 700 | Avg reward: -29.11 | Avg unmet demand: 0.67 | Avg grid import: 20.59 | Epsilon: 0.050
+Episode 800 | Avg reward: -31.13 | Avg unmet demand: 0.90 | Avg grid import: 20.45 | Epsilon: 0.050
+Episode 900 | Avg reward: -34.20 | Avg unmet demand: 1.05 | Avg grid import: 21.66 | Epsilon: 0.050
+Episode 1000 | Avg reward: -32.18 | Avg unmet demand: 0.87 | Avg grid import: 21.77 | Epsilon: 0.050
+```
+
+### Main training result
+
+```text
+Average reward first 100: -48.357
+Average reward last 100: -32.179
+
+Average unmet demand first 100: 2.42
+Average unmet demand last 100: 0.87
+```
+
+This shows that the Q-learning agent is learning. The average reward becomes much less negative, and the average unmet demand decreases by more than half.
+
+### Greedy policy evaluation
+
+After training, I evaluated the learned greedy policy on one 24-step episode.
+
+```text
+Learned policy episode summary
+------------------------------
+Total reward: -33.2
+Total grid import: 21.5
+Total wasted solar: 2.0
+Total battery used: 7.0
+Total unmet demand: 1.0
+```
+
+For comparison, the earlier random policy baseline was:
+
+```text
+Random policy episode summary
+-----------------------------
+Total reward: -77.6
+Total grid import: 26.0
+Total wasted solar: 2.0
+Total battery used: 6.0
+Total unmet demand: 5.0
+```
+
+### Interpretation
+
+The learned policy is clearly better than random on this test episode. It reduces unmet demand from 5.0 to 1.0 and improves total reward from -77.6 to -33.2. This suggests that the agent has learned to use the battery in a more useful way.
+
+However, the learned policy is not perfect. In the greedy episode, it still discharges early at night, which may not always be ideal because evening demand is usually harder to meet. This could be due to the reward function encouraging immediate reduction in grid import, or because one evaluation episode is noisy.
+
+The next step is to evaluate both the random policy and the learned policy over many episodes, not just one, so that the comparison is more reliable.
+
+## Basic evaluation over 100 episodes
+
+I evaluated the random policy and the trained Q-learning policy over 100 episodes each. This is more reliable than comparing only one episode, because demand and solar are sampled stochastically.
+
+The random policy chooses charge, idle, and discharge with equal probability. The Q-learning policy uses the learned Q-table greedily after training.
+
+### Output
+
+```text
+Training Q-learning agent...
+Evaluating random policy...
+Evaluating learned greedy policy...
+
+Average performance over 100 episodes
+-------------------------------------
+Policy                   Reward       Grid      Unmet      Waste    Battery
+---------------------------------------------------------------------------
+Random                   -50.86      21.61       2.67       3.83       6.32
+Q-learning greedy        -32.67      20.75       0.98       2.73       7.54
+```
+
+### Interpretation
+
+The Q-learning policy clearly improves over the random policy.
+
+The average reward improves from `-50.86` to `-32.67`, meaning the learned policy receives fewer penalties overall. More importantly, average unmet demand falls from `2.67` to `0.98`. This is the most important result because unmet demand represents failure to meet the community load when solar, battery, and limited grid import are not enough.
+
+Grid import also falls slightly, from `21.61` to `20.75`. This improvement is smaller than the unmet demand improvement, but it still shows that the learned policy is relying slightly less on the grid. Wasted solar also falls from `3.83` to `2.73`, suggesting that the Q-learning policy makes better use of available solar energy.
+
+Battery use increases from `6.32` to `7.54`. This is not automatically bad. In this case, the higher battery use appears to be useful because it is associated with lower unmet demand and better total reward. The key point is that the agent is learning to use the battery more productively than random behaviour.
+
+Overall, this confirms that tabular Q-learning is learning a meaningful control policy in the discrete microgrid environment.
