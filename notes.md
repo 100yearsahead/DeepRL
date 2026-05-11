@@ -363,3 +363,109 @@ Grid import also falls slightly, from `21.61` to `20.75`. This improvement is sm
 Battery use increases from `6.32` to `7.54`. This is not automatically bad. In this case, the higher battery use appears to be useful because it is associated with lower unmet demand and better total reward. The key point is that the agent is learning to use the battery more productively than random behaviour.
 
 Overall, this confirms that tabular Q-learning is learning a meaningful control policy in the discrete microgrid environment.
+
+## Q-learning hyperparameter sweep
+
+I ran a small hyperparameter sweep to test how Q-learning behaviour changes with different values of gamma, alpha, and epsilon decay.
+
+The baseline setting was:
+
+```text
+alpha = 0.30
+gamma = 0.95
+epsilon_decay = 0.995
+```
+
+The sweep tested:
+- gamma: 0.50, 0.80, 0.95, 0.99
+- alpha: 0.10, 0.30, 0.70
+- epsilon decay: 0.980, 0.995, 0.999
+
+The goal was not to search every possible combination, but to understand how the main Q-learning parameters affect performance.
+
+### Output
+
+```text
+Q-learning hyperparameter sweep
+-------------------------------
+Experiment           Alpha   Gamma  EpsDecay     Reward       Grid      Unmet      Waste    Battery
+---------------------------------------------------------------------------------------------------------
+baseline              0.30    0.95     0.995     -32.67      20.75       0.98       2.73       7.54
+gamma_low             0.30    0.50     0.995     -29.90      20.39       0.76       2.14       8.45
+gamma_mid             0.30    0.80     0.995     -30.75      20.48       0.84       2.15       8.02
+gamma_high            0.30    0.99     0.995     -33.83      20.61       1.12       2.48       7.92
+alpha_low             0.10    0.95     0.995     -27.96      21.80       0.44       2.12       7.02
+alpha_high            0.70    0.95     0.995     -31.41      22.29       0.71       2.70       6.71
+eps_fast              0.30    0.95     0.980     -32.59      20.31       1.04       2.12       8.25
+eps_slow              0.30    0.95     0.999     -30.59      21.39       0.69       3.24       6.82
+```
+
+### Interpretation
+
+The best result in this sweep was `alpha_low`, with:
+
+```text
+alpha = 0.10
+gamma = 0.95
+epsilon_decay = 0.995
+```
+
+This achieved the best reward, `-27.96`, and the lowest unmet demand, `0.44`.
+
+The gamma sweep gave an interesting result. I originally expected higher gamma to perform best because battery scheduling seems like a future-planning problem. However, lower gamma values performed better in this simplified environment. `gamma = 0.50` achieved a reward of `-29.90`, while `gamma = 0.99` gave a weaker reward of `-33.83`.
+
+This suggests that the environment does not require very long-term planning over many steps. Since the state already includes time-of-day, demand regime, solar regime, and battery level, the agent can often make useful decisions from the current state without needing to heavily weight distant future rewards.
+
+The alpha sweep showed that a smaller learning rate worked best. `alpha = 0.10` outperformed both the baseline and the high-alpha setting. This makes sense because the environment is stochastic: demand and solar are sampled from probability distributions. A lower alpha means the Q-table updates more cautiously and does not overreact too strongly to individual random transitions.
+
+The epsilon decay sweep showed that slower exploration helped compared with the baseline. `epsilon_decay = 0.999` achieved better reward and unmet demand than the baseline. This suggests that longer exploration helps the agent discover useful actions in rare but important states, such as high-demand, low-solar states with low battery.
+
+Overall, the sweep shows that Q-learning performance is sensitive to the main hyperparameters. The best setting found was a cautious learning rate with continued exploration.
+
+## Rule-based baseline
+
+I added a simple rule-based controller so that Q-learning is compared against a basic human-designed strategy, not just random actions.
+
+The rule-based policy was:
+
+```text
+if solar > demand and battery is not full:
+    charge
+elif demand > solar and battery has energy:
+    discharge
+else:
+    idle
+```
+
+The idea is simple: store solar surplus when possible, use the battery when demand is higher than solar, and otherwise do nothing.
+
+### Output
+
+```text
+Rule-based policy average performance over 100 episodes
+-------------------------------------------------------
+Policy                   Reward       Grid      Unmet      Waste    Battery
+---------------------------------------------------------------------------
+Rule-based               -38.88      19.05       1.83       1.18       9.37
+```
+
+### Comparison so far
+
+```text
+Policy              Reward   Grid   Unmet   Waste   Battery
+Random              -50.86   21.61   2.67    3.83    6.32
+Rule-based          -38.88   19.05   1.83    1.18    9.37
+Q-learning greedy   -32.67   20.75   0.98    2.73    7.54
+```
+
+### Interpretation
+
+The rule-based policy performs better than random, which makes sense. It follows a reasonable hand-written strategy: charge when there is solar surplus and discharge when demand is higher than solar.
+
+The rule-based controller gives the lowest grid import and lowest wasted solar so far. This shows that the hand-written rules are good at using local solar energy efficiently.
+
+However, the Q-learning policy still achieves the best average reward and the lowest unmet demand. This matters because unmet demand is the most serious failure in the reward function. The rule-based policy uses the battery more aggressively, with average battery use of `9.37`, but still leaves more unmet demand than Q-learning.
+
+So the early result suggests that Q-learning is learning a better trade-off for the reward function used in this environment. It does not simply minimise grid import. Instead, it seems to reduce the most costly failure, which is unmet demand.
+
+This is a stronger comparison than random vs Q-learning alone because the learned policy is now being compared against a simple human-designed controller.
