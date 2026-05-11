@@ -469,3 +469,353 @@ However, the Q-learning policy still achieves the best average reward and the lo
 So the early result suggests that Q-learning is learning a better trade-off for the reward function used in this environment. It does not simply minimise grid import. Instead, it seems to reduce the most costly failure, which is unmet demand.
 
 This is a stronger comparison than random vs Q-learning alone because the learned policy is now being compared against a simple human-designed controller.
+
+## Updated Q-learning hyperparameter sweep
+
+I reran the Q-learning hyperparameter sweep using a more stable evaluation setup.
+
+Each hyperparameter setting was:
+
+- trained for 1000 episodes
+- evaluated over 1000 episodes using the learned greedy policy
+
+This is more reliable than evaluating on only one episode, because the environment is stochastic. Demand and solar generation are sampled using time-dependent probabilities, so a single episode can be unusually easy or difficult.
+
+The purpose of this experiment was to see how the main Q-learning parameters affect performance:
+
+- `alpha`: how strongly the Q-table updates after each transition
+- `gamma`: how much the agent values future rewards
+- `epsilon_decay`: how quickly the agent shifts from exploration to exploitation
+
+The baseline setting was:
+
+```text
+alpha = 0.30
+gamma = 0.95
+epsilon_decay = 0.995
+```
+
+### Output
+
+```text
+Q-learning hyperparameter sweep
+-------------------------------
+Experiment           Alpha   Gamma  EpsDecay     Reward       Grid      Unmet      Waste    Battery
+---------------------------------------------------------------------------------------------------------
+baseline              0.30    0.95     0.995     -33.63      21.38       1.02       2.59       7.45
+gamma_low             0.30    0.50     0.995     -31.37      20.84       0.87       1.97       8.46
+gamma_mid             0.30    0.80     0.995     -32.39      20.96       0.96       2.02       8.07
+gamma_high            0.30    0.99     0.995     -35.50      21.18       1.24       2.33       7.82
+alpha_low             0.10    0.95     0.995     -28.49      22.24       0.46       1.96       7.13
+alpha_high            0.70    0.95     0.995     -31.77      22.88       0.70       2.47       6.74
+eps_fast              0.30    0.95     0.980     -32.72      20.79       1.01       1.94       8.34
+eps_slow              0.30    0.95     0.999     -32.80      22.02       0.86       3.02       6.71
+```
+
+### What the metrics mean
+
+The main metrics are:
+
+- `Reward`: total average episode reward. Higher is better, but because the reward is made of penalties, “higher” means less negative.
+- `Grid`: average grid import per episode. Lower means the controller is relying less on external grid energy.
+- `Unmet`: average unmet demand per episode. This is the most important reliability metric because it means demand was not supplied.
+- `Waste`: average wasted solar per episode. Lower means more solar was used or stored.
+- `Battery`: average battery use per episode. This is not automatically good or bad. Battery use is useful if it reduces unmet demand, but unnecessary battery use creates wear.
+
+Because unmet demand has the largest penalty in the reward function, the best policy is not necessarily the one with the lowest grid import. The best policy is the one that balances grid import, solar waste, battery use, and especially unmet demand.
+
+### Main result
+
+The best setting in the sweep was:
+
+```text
+alpha_low:
+alpha = 0.10
+gamma = 0.95
+epsilon_decay = 0.995
+```
+
+It achieved:
+
+```text
+reward = -28.49
+unmet demand = 0.46
+```
+
+This was better than the baseline:
+
+```text
+baseline:
+reward = -33.63
+unmet demand = 1.02
+```
+
+So lowering the learning rate from `0.30` to `0.10` improved both the overall reward and the reliability of the learned policy.
+
+### Alpha sweep interpretation
+
+The alpha sweep compared:
+
+```text
+alpha_low  = 0.10
+baseline   = 0.30
+alpha_high = 0.70
+```
+
+Results:
+
+```text
+alpha_low   reward = -28.49, unmet = 0.46
+baseline    reward = -33.63, unmet = 1.02
+alpha_high  reward = -31.77, unmet = 0.70
+```
+
+The lower learning rate performed best.
+
+This makes sense because the environment is stochastic. Demand and solar generation are not fixed; they are sampled from probability distributions based on time of day. If alpha is too high, the Q-table may update too aggressively from one sampled transition, even if that transition is not representative of the usual behaviour of that state.
+
+A lower alpha updates the Q-table more cautiously. In this experiment, that produced a more reliable learned policy and reduced unmet demand the most.
+
+This is an important result because it shows that the agent benefits from gradual learning in a noisy environment.
+
+### Gamma sweep interpretation
+
+The gamma sweep compared:
+
+```text
+gamma_low  = 0.50
+gamma_mid  = 0.80
+baseline   = 0.95
+gamma_high = 0.99
+```
+
+Results:
+
+```text
+gamma_low   reward = -31.37, unmet = 0.87
+gamma_mid   reward = -32.39, unmet = 0.96
+baseline    reward = -33.63, unmet = 1.02
+gamma_high  reward = -35.50, unmet = 1.24
+```
+
+I originally expected high gamma to perform best because battery scheduling seems like a future-planning problem. For example, the agent may need to save battery earlier in the day to avoid unmet demand later in the evening.
+
+However, the results show that lower gamma values performed better than very high gamma. `gamma = 0.50` outperformed both `gamma = 0.95` and `gamma = 0.99`.
+
+A possible explanation is that this basic environment is short and strongly state-informed. Each episode only lasts 24 steps, and the state already includes:
+
+- battery level
+- demand regime
+- solar regime
+- time of day
+
+Because of this, the agent can often make useful decisions from the current state without needing to heavily weight far-future rewards. Very high gamma may also make the agent propagate noisy future value estimates too strongly, which can hurt performance in a stochastic environment.
+
+So although high gamma is usually useful when long-term planning is important, in this simplified discrete environment a lower gamma was more effective.
+
+### Epsilon decay interpretation
+
+The epsilon decay sweep compared:
+
+```text
+eps_fast = 0.980
+baseline = 0.995
+eps_slow = 0.999
+```
+
+Results:
+
+```text
+eps_fast  reward = -32.72, unmet = 1.01
+baseline  reward = -33.63, unmet = 1.02
+eps_slow  reward = -32.80, unmet = 0.86
+```
+
+The differences here are smaller than in the alpha sweep.
+
+The slower epsilon decay achieved lower unmet demand than the baseline. This suggests that longer exploration can help the agent encounter rare but important states, such as:
+
+- high demand
+- low solar
+- low battery
+
+These states are costly because they can produce unmet demand. If the agent stops exploring too early, it may not learn enough about how to act in those cases.
+
+However, slower exploration did not produce the best reward overall. It also had higher wasted solar than the fast-decay setting. This suggests a trade-off: extended exploration may improve reliability, but it can also keep the policy less efficient for longer.
+
+Overall, epsilon decay affected performance, but alpha had the clearest impact in this sweep.
+
+### Overall interpretation
+
+This experiment shows that Q-learning performance is sensitive to hyperparameter choices.
+
+The strongest finding is that a lower learning rate worked best. The `alpha_low` setting produced the best reward and lowest unmet demand, suggesting that cautious Q-value updates are helpful in this stochastic microgrid environment.
+
+The gamma results were more surprising. Very high gamma did not perform best, even though the task involves battery planning. This suggests that the short episode length and informative state representation make immediate/current-state information very important.
+
+The epsilon decay results suggest that exploration still matters, especially for rare failure states, but changing epsilon decay had a smaller effect than changing alpha.
+
+For the report, the key conclusion is:
+
+> The best Q-learning configuration was not the most aggressive one. A cautious learning rate produced the most reliable policy, reducing unmet demand while improving overall reward.
+
+## Basic Q-learning results and plots
+
+At this stage, the basic tabular Q-learning part is mostly working. The environment is a small discrete microgrid where the agent controls a battery. The agent sees the battery level, demand regime, solar regime, and time of day. It can choose to charge, idle, or discharge.
+
+The main objective is not just to get a high reward in an abstract sense. The useful behaviour is for the agent to reduce unmet demand, reduce grid import where possible, avoid wasting solar, and avoid unnecessary battery use.
+
+### What I implemented
+
+So far I have implemented:
+
+- a discrete microgrid environment;
+- a random policy baseline;
+- a simple rule-based battery controller;
+- a tabular Q-learning agent;
+- a multi-episode evaluation script;
+- a hyperparameter sweep;
+- plotting scripts for the basic results.
+
+The Q-learning state is:
+
+```text
+(battery_level, demand_regime, solar_regime, time_bin)
+```
+
+The actions are:
+
+```text
+0 = charge
+1 = idle
+2 = discharge
+```
+
+The reward is based on penalties:
+
+```text
+reward = -10 * unmet_demand
+         -1 * grid_import
+         -0.5 * wasted_solar
+         -0.1 * battery_use
+```
+
+This means unmet demand is treated as the most serious failure.
+
+### Why I added a grid import limit
+
+At first, unmet demand was always zero because the grid could cover all remaining demand. That made the environment less interesting as a load-balancing problem.
+
+I added a maximum grid import limit so that if demand is high, solar is low, and the battery cannot help, then unmet demand becomes possible. This makes the environment closer to a real resource-limited control problem.
+
+### Baselines
+
+I compared three policies:
+
+1. Random policy  
+2. Rule-based policy  
+3. Q-learning greedy policy after training  
+
+The random policy chooses actions randomly. The rule-based policy follows a simple hand-written strategy:
+
+```text
+if solar > demand and battery is not full:
+    charge
+elif demand > solar and battery has energy:
+    discharge
+else:
+    idle
+```
+
+The Q-learning policy learns from interaction with the environment.
+
+### Baseline comparison
+
+The current comparison is:
+
+```text
+Policy              Reward   Grid   Unmet   Waste   Battery
+Random              -50.86   21.61   2.67    3.83    6.32
+Rule-based          -38.88   19.05   1.83    1.18    9.37
+Q-learning greedy   -32.67   20.75   0.98    2.73    7.54
+```
+
+The rule-based policy is better than random, especially for grid import and wasted solar. This makes sense because it directly uses simple energy rules.
+
+However, the Q-learning policy gets the best overall reward and the lowest unmet demand. This is important because unmet demand is the largest penalty in the reward function. So the Q-learning policy is not just minimising grid import. It is learning a better trade-off under the reward structure.
+
+### Hyperparameter sweep
+
+I also ran a small hyperparameter sweep. Each setting was trained for 1000 episodes and evaluated over 1000 episodes.
+
+The parameters tested were:
+
+- `alpha`: learning rate
+- `gamma`: discount factor
+- `epsilon_decay`: exploration decay rate
+
+The output was:
+
+```text
+Q-learning hyperparameter sweep
+-------------------------------
+Experiment           Alpha   Gamma  EpsDecay     Reward       Grid      Unmet      Waste    Battery
+---------------------------------------------------------------------------------------------------------
+baseline              0.30    0.95     0.995     -33.63      21.38       1.02       2.59       7.45
+gamma_low             0.30    0.50     0.995     -31.37      20.84       0.87       1.97       8.46
+gamma_mid             0.30    0.80     0.995     -32.39      20.96       0.96       2.02       8.07
+gamma_high            0.30    0.99     0.995     -35.50      21.18       1.24       2.33       7.82
+alpha_low             0.10    0.95     0.995     -28.49      22.24       0.46       1.96       7.13
+alpha_high            0.70    0.95     0.995     -31.77      22.88       0.70       2.47       6.74
+eps_fast              0.30    0.95     0.980     -32.72      20.79       1.01       1.94       8.34
+eps_slow              0.30    0.95     0.999     -32.80      22.02       0.86       3.02       6.71
+```
+
+The best setting was:
+
+```text
+alpha = 0.10
+gamma = 0.95
+epsilon_decay = 0.995
+```
+
+This gave the best reward and the lowest unmet demand.
+
+My interpretation is that a lower learning rate works better because the environment is stochastic. Demand and solar are sampled randomly from time-dependent distributions, so a high alpha can overreact to individual transitions. A lower alpha updates the Q-table more cautiously.
+
+The gamma result was interesting. I expected higher gamma to help because battery scheduling sounds like a future-planning problem. But very high gamma did not work best. This may be because the state already includes useful information: battery level, demand, solar, and time of day. So the agent can often make useful decisions from the current state without putting too much weight on far-future rewards.
+
+### Learning curves
+
+I generated two main learning curves:
+
+1. Q-learning reward over training  
+2. Unmet demand over training  
+
+The reward curve is noisy, which is expected because the environment samples demand and solar stochastically. The moving average is more important than the raw episode values. The moving average generally becomes less negative, showing that the agent improves over training.
+
+The unmet demand curve is especially important. It shows that the agent becomes better at avoiding the main failure case, which is not meeting demand. This is more meaningful than reward alone because unmet demand is directly tied to the microgrid control objective.
+
+### Battery trajectory
+
+I also plotted one example greedy-policy episode after training. This plot shows battery level, demand, and solar generation over a simulated day.
+
+This is mainly for qualitative interpretation. A single episode can be noisy, so I should not overclaim from it. But it helps show how the learned policy changes the battery level in response to demand and solar conditions.
+
+### Heatmap note
+
+I also generated a learned-policy heatmap for evening / low-solar states. This is useful for checking the Q-table, but I probably will not use it in the main report because it is still a bit noisy. Some state combinations may be rarely visited, so the learned action is not always smooth.
+
+For the report, it is better to rely on the aggregate metrics and learning curves, then use the battery trajectory as the qualitative visual.
+
+### Report plan for Basic section
+
+For the report, I should use:
+
+- Figure: Q-learning reward curve
+- Figure: unmet demand curve
+- Table: random vs rule-based vs Q-learning
+- Table: hyperparameter sweep
+- Figure: battery trajectory, if there is space
+
+I probably should not include every plot. The report will look cleaner if I only include the plots that directly support the marking criteria.
