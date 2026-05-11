@@ -14,7 +14,7 @@ def run_experiment(name, alpha=0.3, gamma=0.95, epsilon_decay=0.995):
         seed=42,
     )
 
-    results = run_greedy_policy(agent, num_episodes=100, seed=200)
+    results = run_greedy_policy(agent, num_episodes=1000, seed=100)
 
     results["name"] = name
     results["alpha"] = alpha
