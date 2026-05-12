@@ -819,3 +819,65 @@ For the report, I should use:
 - Figure: battery trajectory, if there is space
 
 I probably should not include every plot. The report will look cleaner if I only include the plots that directly support the marking criteria.
+
+## Continuous microgrid environment sanity check
+
+I created the continuous version of the microgrid environment for the DQN part.
+
+The basic control problem is the same as the tabular environment: the agent controls the battery by choosing charge, idle, or discharge. The difference is that the state is now continuous rather than discrete.
+
+The state vector is:
+
+```text
+[battery_soc, demand_norm, solar_norm, price_norm, hour_sin, hour_cos]
+
+Reward: -0.378
+Next state: [0.4        0.23230092 0.         0.4        0.5        0.8660254 ]
+Info: {'demand': 1.347, 'solar': 0.0, 'battery_soc': 0.4, 'grid_import': 0.347, 'unmet_demand': 0.0, 'wasted_solar': 0.0}
+
+Step: 3
+Action: idle
+Reward: -0.743
+Next state: [0.4        0.321211   0.         0.4        0.70710677 0.70710677]
+Info: {'demand': 0.929, 'solar': 0.0, 'battery_soc': 0.4, 'grid_import': 0.929, 'unmet_demand': 0.0, 'wasted_solar': 0.0}
+
+Step: 4
+Action: discharge
+Reward: -0.328
+Next state: [0.3       0.3285202 0.        0.4       0.8660254 0.5      ]
+Info: {'demand': 1.285, 'solar': 0.0, 'battery_soc': 0.3, 'grid_import': 0.285, 'unmet_demand': 0.0, 'wasted_solar': 0.0}
+
+Step: 5
+Action: idle
+Reward: -1.051
+Next state: [0.3        0.3493248  0.         0.4        0.9659258  0.25881904]
+Info: {'demand': 1.314, 'solar': 0.0, 'battery_soc': 0.3, 'grid_import': 1.314, 'unmet_demand': 0.0, 'wasted_solar': 0.0}
+
+## First DQN run
+
+The first DQN run trained successfully on the continuous microgrid environment. Average reward improved from around -29.78 in the first 100 episodes to around -18.85 by episode 1000. Average unmet demand also dropped from 0.62 to 0.03, and the training loss decreased from 0.1110 to around 0.0179.
+
+In evaluation over 100 episodes, the learned DQN policy achieved:
+
+Reward: -18.15
+Grid import: 14.42
+Unmet demand: 0.0
+Wasted solar: 1.95
+Battery used: 10.43
+
+These results suggest that DQN learned a strong battery-control policy. However, the performance may also indicate that the continuous environment is relatively easy, since demand and solar follow smooth daily patterns. The next step is to compare DQN against random and rule-based baselines in the same continuous environment, and then run stress tests with lower solar, smaller battery capacity, and higher demand noise.
+
+## Continuous environment baseline comparison
+
+After training the first DQN agent, I compared it against random and rule-based policies in the continuous microgrid environment.
+
+### Output
+
+```text
+Continuous environment policy comparison
+----------------------------------------
+Policy                 Reward       Grid      Unmet      Waste    Battery
+---------------------------------------------------------------------------
+Random                 -32.63      19.36       0.71       5.67       4.83
+Rule-based             -18.60      14.42       0.00       1.95      10.43
+DQN                    -18.15      14.42       0.00       1.95      10.43
